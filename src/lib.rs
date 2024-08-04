@@ -117,4 +117,33 @@ mod tests {
 
         println!("\n{:#?}", l.borrow()._prev);
     }
+
+    #[test]
+    fn nueron() {
+        // Inputs x1, x2
+        let x1 = Value::new(2.0);
+        let x2 = Value::new(0.0);
+        // Weights w1, w2
+        let w1 = Value::new(-3.0);
+        let w2 = Value::new(1.0);
+        // Bias of the neuron
+        let b = Value::new(6.88137);
+
+        let x1w1 = &x1 * &w1;
+        let x2w2 = &x2 * &w2;
+        let x1w1_x2w2 = &x1w1 + &x2w2;
+        // Unactivated output of the neuron
+        let n = &x1w1_x2w2 + &b;
+        // Tanh activation
+        let e = (2.0 * &n).exp();
+        let o = &(&e - 1.0) / &(&e + 1.0);
+        // Backpropagate the gradient
+        o.backward();
+
+        println!("{:#?}", o);
+        assert_eq!((x1.borrow().grad * 10.0) as i32, -15);
+        assert_eq!((w1.borrow().grad * 10.0) as i32, 10);
+        assert_eq!((x2.borrow().grad * 10.0) as i32, 5);
+        assert_eq!((w2.borrow().grad * 10.0) as i32, 0);
+    }
 }

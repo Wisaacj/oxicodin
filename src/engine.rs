@@ -12,6 +12,7 @@ pub enum Op {
     Div,
     Sub,
     Pow,
+    Exp,
     None,
 }
 
@@ -37,6 +38,8 @@ impl InnerValue {
 }
 
 #[derive(Debug)]
+/// Value is designed to provide shared, mutable access to the inner value through
+/// reference counting and interior mutability.
 pub struct Value {
     pub v: Rc<RefCell<InnerValue>>,
 }
@@ -220,6 +223,23 @@ impl Value {
 
         out
     }
+
+    pub fn exp(&self) -> Value {
+        let out = Value::_new(
+            self.borrow().data.exp(),
+            [Value::clone(self), Value::new(0.0)],
+            Op::Exp,
+        );
+
+        out.borrow_mut()._backward = |parent: &InnerValue| {
+            if let Some(children) = &parent._prev {
+                let mut lhs = children[0].borrow_mut();
+                lhs.grad += parent.data * parent.grad;
+            }
+        };
+
+        out
+    }
 }
 
 impl Neg for &Value {
@@ -244,5 +264,24 @@ impl Sub<&Value> for &Value {
 
     fn sub(self, rhs: &Value) -> Self::Output {
         self + &(-rhs)
+    }
+}
+
+impl Sub<f32> for &Value {
+    type Output = Value;
+
+    // Value - f32
+    fn sub(self, rhs: f32) -> Self::Output {
+        let rhs = Value::new(rhs);
+        self - &rhs
+    }
+}
+
+impl Sub<&Value> for f32 {
+    type Output = Value;
+
+    // f32 - Value
+    fn sub(self, rhs: &Value) -> Self::Output {
+        rhs - self
     }
 }
