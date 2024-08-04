@@ -10,8 +10,25 @@ mod tests {
         let b = Value::new(4.0);
         let c = &a + &b;
 
-        println!("{:?}", c.borrow().data);
-        println!("{:?}", c.borrow()._prev);
+        println!("{:#?}", c);
+    }
+
+    #[test]
+    fn it_adds_f32() {
+        let a = Value::new(3.0);
+        let b = 4.0;
+        let c = &a + b;
+
+        println!("{:#?}", c);
+    }
+
+    #[test]
+    fn it_radds_f32() {
+        let a = Value::new(3.0);
+        let b = 4.0;
+        let c = b + &a;
+
+        println!("{:#?}", c);
     }
 
     #[test]
@@ -20,8 +37,34 @@ mod tests {
         let b = Value::new(4.0);
         let c = &a * &b;
 
-        println!("{:?}", c.borrow().data);
-        println!("{:?}", c.borrow()._prev);
+        println!("{:#?}", c);
+    }
+
+    #[test]
+    fn it_multiplies_f32() {
+        let a = Value::new(3.0);
+        let b = 4.0;
+        let c = &a * b;
+
+        println!("{:#?}", c);
+    }
+
+    #[test]
+    fn it_rmultiplies_f32() {
+        let a = Value::new(3.0);
+        let b = 4.0;
+        let c = b * &a;
+
+        println!("{:#?}", c);
+    }
+
+    #[test]
+    fn it_divides() {
+        let a = Value::new(3.0);
+        let b = Value::new(4.0);
+        let c = &a / &b;
+
+        println!("{:#?}", c);
     }
 
     #[test]
@@ -72,6 +115,6 @@ mod tests {
             l.borrow().grad
         );
 
-        println!("\n{:?}", l.borrow()._prev);
+        println!("\n{:#?}", l.borrow()._prev);
     }
 }

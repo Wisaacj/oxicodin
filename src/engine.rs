@@ -1,25 +1,37 @@
 use std::{
     cell::{Ref, RefCell, RefMut},
     collections::HashSet,
-    ops::{Add, Mul},
+    ops::{Add, Div, Mul, Neg, Sub},
     rc::Rc,
 };
+
+#[derive(Debug)]
+pub enum Op {
+    Add,
+    Mul,
+    Div,
+    Sub,
+    Pow,
+    None,
+}
 
 #[derive(Debug)]
 pub struct InnerValue {
     pub data: f32,
     pub grad: f32,
     pub _backward: fn(&InnerValue),
+    pub _op: Op,
     pub _prev: Option<[Value; 2]>,
 }
 
 impl InnerValue {
-    pub fn new(data: f32, children: Option<[Value; 2]>) -> InnerValue {
+    pub fn new(data: f32, children: Option<[Value; 2]>, op: Op) -> InnerValue {
         InnerValue {
             data,
             grad: 0.0,
             _backward: |_: &InnerValue| {},
             _prev: children,
+            _op: op,
         }
     }
 }
@@ -32,14 +44,14 @@ pub struct Value {
 impl Value {
     pub fn new(data: f32) -> Value {
         Value {
-            v: Rc::new(RefCell::new(InnerValue::new(data, None))),
+            v: Rc::new(RefCell::new(InnerValue::new(data, None, Op::None))),
         }
     }
 
     /// New with children
-    fn _new(data: f32, children: Option<[Value; 2]>) -> Value {
+    fn _new(data: f32, children: [Value; 2], op: Op) -> Value {
         Value {
-            v: Rc::new(RefCell::new(InnerValue::new(data, children))),
+            v: Rc::new(RefCell::new(InnerValue::new(data, Some(children), op))),
         }
     }
 
@@ -86,11 +98,13 @@ impl Value {
 }
 
 impl Clone for Value {
+    /// Clones the Rc pointer to the inner value.
+    ///
+    /// Calling Rc::clone() does not perform a deep clone of the data inside Rc. Instead,
+    /// it only increments the reference count and returns a new Rc pointing to the same data.
+    /// This is an O(1) operation and is very fast.
     fn clone(&self) -> Value {
         Value {
-            // Calling Rc::clone() does not perform a deep clone of the data inside Rc. Instead,
-            // it only increments the reference count and returns a new Rc pointing to the same data.
-            // This is an O(1) operation and is very fast.
             v: Rc::clone(&self.v),
         }
     }
@@ -102,7 +116,8 @@ impl Add<&Value> for &Value {
     fn add(self, rhs: &Value) -> Self::Output {
         let out = Value::_new(
             self.borrow().data + rhs.borrow().data,
-            Some([Value::clone(self), Value::clone(rhs)]),
+            [Value::clone(self), Value::clone(rhs)],
+            Op::Add,
         );
 
         // Defining a closure to calculate & accumulate the gradients of out's children.
@@ -111,7 +126,9 @@ impl Add<&Value> for &Value {
                 let mut lhs = children[0].borrow_mut();
                 let mut rhs = children[1].borrow_mut();
 
-                // Route the gradient from `parent` to its children.
+                // Route the gradient from `parent` to its children. The local gradient
+                // (d out) / (d lhs) = 1.0. This is then multipled by the gradient of the
+                // parent according to the chain rule.
                 lhs.grad += 1.0 * parent.grad;
                 rhs.grad += 1.0 * parent.grad;
             };
@@ -121,13 +138,33 @@ impl Add<&Value> for &Value {
     }
 }
 
+impl Add<f32> for &Value {
+    type Output = Value;
+
+    // Value + f32
+    fn add(self, rhs: f32) -> Self::Output {
+        let rhs = Value::new(rhs);
+        self + &rhs
+    }
+}
+
+impl Add<&Value> for f32 {
+    type Output = Value;
+
+    // f32 + Value
+    fn add(self, rhs: &Value) -> Self::Output {
+        rhs + self
+    }
+}
+
 impl Mul<&Value> for &Value {
     type Output = Value;
 
     fn mul(self, rhs: &Value) -> Self::Output {
         let out = Value::_new(
             self.borrow().data * rhs.borrow().data,
-            Some([Value::clone(self), Value::clone(rhs)]),
+            [Value::clone(self), Value::clone(rhs)],
+            Op::Mul,
         );
 
         out.borrow_mut()._backward = |parent: &InnerValue| {
@@ -145,11 +182,31 @@ impl Mul<&Value> for &Value {
     }
 }
 
+impl Mul<f32> for &Value {
+    type Output = Value;
+
+    // Value * f32
+    fn mul(self, rhs: f32) -> Self::Output {
+        let rhs = Value::new(rhs);
+        self * &rhs
+    }
+}
+
+impl Mul<&Value> for f32 {
+    type Output = Value;
+
+    // f32 * Value
+    fn mul(self, rhs: &Value) -> Self::Output {
+        rhs * self
+    }
+}
+
 impl Value {
     pub fn pow(&self, exponent: f32) -> Value {
         let out = Value::_new(
             self.borrow().data.powf(exponent),
-            Some([Value::clone(self), Value::new(exponent)]),
+            [Value::clone(self), Value::new(exponent)],
+            Op::Pow,
         );
 
         out.borrow_mut()._backward = |parent: &InnerValue| {
@@ -162,5 +219,30 @@ impl Value {
         };
 
         out
+    }
+}
+
+impl Neg for &Value {
+    type Output = Value;
+
+    fn neg(self) -> Self::Output {
+        self * -1.0
+    }
+}
+
+impl Div<&Value> for &Value {
+    type Output = Value;
+
+    fn div(self, rhs: &Value) -> Self::Output {
+        // a / b = a * (1 / b) = a * b^-1
+        self * &rhs.pow(-1.0)
+    }
+}
+
+impl Sub<&Value> for &Value {
+    type Output = Value;
+
+    fn sub(self, rhs: &Value) -> Self::Output {
+        self + &(-rhs)
     }
 }
