@@ -58,14 +58,6 @@ impl Value {
         }
     }
 
-    pub fn borrow_mut(&self) -> RefMut<'_, InnerValue> {
-        self.v.borrow_mut()
-    }
-
-    pub fn borrow(&self) -> Ref<'_, InnerValue> {
-        self.v.borrow()
-    }
-
     pub fn backward(&self) {
         let mut topo = Vec::new();
         let mut visited = HashSet::<*const InnerValue>::new();
@@ -97,6 +89,45 @@ impl Value {
             let backward_fn = node.borrow()._backward;
             backward_fn(&node.borrow());
         }
+    }
+}
+
+/// API improvments
+impl Value {
+    pub fn data(&self) -> f32 {
+        self.borrow().data
+    }
+
+    pub fn grad(&self) -> f32 {
+        self.borrow().grad
+    }
+
+    pub fn borrow_mut(&self) -> RefMut<'_, InnerValue> {
+        self.v.borrow_mut()
+    }
+
+    pub fn borrow(&self) -> Ref<'_, InnerValue> {
+        self.v.borrow()
+    }
+}
+
+/// Activation functions
+impl Value {
+    pub fn tanh(&self) -> Value {
+        let x = self.data();
+        let t = ((2.0 * x).exp() - 1.0) / ((2.0 * x).exp() + 1.0);
+        let out = Value::_new(t, [Value::clone(self), Value::new(0.0)], Op::None);
+
+        out.borrow_mut()._backward = |parent: &InnerValue| {
+            if let Some(children) = &parent._prev {
+                let mut logit = children[0].borrow_mut();
+
+                // The derivative of tanh is (1 - tanh^2)
+                logit.grad += (1.0 - parent.data.powi(2)) * parent.grad;
+            }
+        };
+
+        out
     }
 }
 
@@ -283,5 +314,11 @@ impl Sub<&Value> for f32 {
     // f32 - Value
     fn sub(self, rhs: &Value) -> Self::Output {
         rhs - self
+    }
+}
+
+impl std::iter::Sum for Value {
+    fn sum<I: Iterator<Item = Value>>(iter: I) -> Self {
+        iter.fold(Value::new(0.0), |acc, x| &acc + &x)
     }
 }
