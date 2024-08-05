@@ -1,6 +1,8 @@
 use crate::engine::Value;
 use rand::Rng;
 
+type ActivationFn = fn(&Value) -> Value;
+
 pub trait Module {
     fn parameters(&self) -> Vec<&Value>;
 
@@ -14,17 +16,22 @@ pub trait Module {
 pub struct Neuron {
     weights: Vec<Value>,
     bias: Value,
+    act_fn: Option<ActivationFn>,
 }
 
 impl Neuron {
-    pub fn new(n_in: usize) -> Self {
+    pub fn new(n_in: usize, act_fn: Option<ActivationFn>) -> Self {
         let mut rng = rand::thread_rng();
         let weights = (0..n_in)
             .map(|_| Value::new(rng.gen_range(-1.0..=1.0)))
             .collect();
         let bias = Value::new(rng.gen_range(-1.0..=1.0));
 
-        Self { weights, bias }
+        Self {
+            weights,
+            bias,
+            act_fn,
+        }
     }
 
     pub fn forward(&self, x: &[Value]) -> Value {
@@ -42,8 +49,11 @@ impl Neuron {
             .fold(Value::new(0.0), |acc, v| &acc + &v);
 
         let pre_activation = &weighted_sum + &self.bias;
-        // Activate the neuron
-        pre_activation.tanh()
+
+        match self.act_fn {
+            Some(f) => f(&pre_activation), // activate the neuron
+            None => pre_activation,
+        }
     }
 }
 
@@ -61,8 +71,8 @@ pub struct Layer {
 }
 
 impl Layer {
-    pub fn new(n_in: usize, n_out: usize) -> Self {
-        let neurons = (0..n_out).map(|_| Neuron::new(n_in)).collect();
+    pub fn new(n_in: usize, n_out: usize, act_fn: Option<ActivationFn>) -> Self {
+        let neurons = (0..n_out).map(|_| Neuron::new(n_in, act_fn)).collect();
 
         Self { neurons }
     }
@@ -83,11 +93,17 @@ pub struct MLP {
 }
 
 impl MLP {
-    pub fn new(n_in: usize, n_outs: &[usize]) -> Self {
+    pub fn new(n_in: usize, n_outs: &[usize], act_fn: ActivationFn) -> Self {
         let layers = n_outs
             .iter()
-            .scan(n_in, |n_in, &n_out| {
-                let layer = Layer::new(*n_in, n_out);
+            .enumerate()
+            .scan(n_in, |n_in, (idx, &n_out)| {
+                let layer_act_fn = if idx == n_outs.len() - 1 {
+                    None // Last layer has no activation function.
+                } else {
+                    Some(act_fn)
+                };
+                let layer = Layer::new(*n_in, n_out, layer_act_fn);
                 *n_in = n_out;
                 Some(layer)
             })
