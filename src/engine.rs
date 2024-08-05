@@ -13,7 +13,7 @@ pub enum Op {
     Sub,
     Pow,
     Exp,
-    None,
+    None, // maybe we can remove this variant and instead use an option
 }
 
 #[derive(Debug)]
@@ -124,6 +124,25 @@ impl Value {
 
                 // The derivative of tanh is (1 - tanh^2)
                 logit.grad += (1.0 - parent.data.powi(2)) * parent.grad;
+            }
+        };
+
+        out
+    }
+
+    pub fn relu(&self) -> Value {
+        let out = Value::_new(
+            self.data().max(0.0),
+            [Value::clone(self), Value::new(0.0)],
+            Op::None,
+        );
+
+        out.borrow_mut()._backward = |parent: &InnerValue| {
+            if let Some(children) = &parent._prev {
+                let mut logit = children[0].borrow_mut();
+
+                // The derivative of ReLU is 1 if x > 0, else 0
+                logit.grad += (parent.data > 0.0) as i32 as f32 * parent.grad;
             }
         };
 
