@@ -1,8 +1,7 @@
 use std::{
-    cell::{Ref, RefCell, RefMut},
     collections::HashSet,
     ops::{Add, Div, Mul, Neg, Sub},
-    rc::Rc,
+    sync::{Arc, Mutex, MutexGuard},
 };
 
 #[derive(Debug)]
@@ -41,36 +40,36 @@ impl InnerValue {
 /// Value is designed to provide shared, mutable access to the inner value through
 /// reference counting and interior mutability.
 pub struct Value {
-    pub v: Rc<RefCell<InnerValue>>,
+    pub v: Arc<Mutex<InnerValue>>,
 }
 
 impl Value {
     pub fn new(data: f32) -> Value {
         Value {
-            v: Rc::new(RefCell::new(InnerValue::new(data, None, Op::None))),
+            v: Arc::new(Mutex::new(InnerValue::new(data, None, Op::None))),
         }
     }
 
     /// New with children
-    fn _new(data: f32, children: [Value; 2], op: Op) -> Value {
+    pub fn new_subtree(data: f32, children: [Value; 2], op: Op) -> Value {
         Value {
-            v: Rc::new(RefCell::new(InnerValue::new(data, Some(children), op))),
+            v: Arc::new(Mutex::new(InnerValue::new(data, Some(children), op))),
         }
     }
 
     pub fn backward(&self) {
         let mut topo = Vec::new();
-        let mut visited = HashSet::<*const InnerValue>::new();
+        let mut visited = HashSet::new();
 
         fn topological_sort(
             vertex: &Value,
             topo: &mut Vec<Value>,
-            visited: &mut HashSet<*const InnerValue>,
+            visited: &mut HashSet<*const Mutex<InnerValue>>,
         ) {
-            let ptr = vertex.v.as_ptr();
+            let ptr = Arc::as_ptr(&vertex.v);
 
             if visited.insert(ptr) {
-                if let Some(children) = &vertex.borrow()._prev {
+                if let Some(children) = &vertex.lock()._prev {
                     for child in children.iter() {
                         topological_sort(child, topo, visited);
                     }
@@ -82,33 +81,61 @@ impl Value {
         topological_sort(self, &mut topo, &mut visited);
 
         // Set the gradient of the output (self) to 1.0
-        self.borrow_mut().grad = 1.0;
+        self.set_grad(1.0);
 
         // Reverse the topological order and call `_backward` on each node
         for node in topo.iter().rev() {
-            let backward_fn = node.borrow()._backward;
-            backward_fn(&node.borrow());
+            let backward_fn = node.lock()._backward;
+            backward_fn(&node.lock());
         }
     }
 }
 
 /// API improvments
 impl Value {
+    // pub fn data(&self) -> f32 {
+    //     self.data()
+    // }
+
+    // pub fn grad(&self) -> f32 {
+    //     self.borrow().grad
+    // }
+
     pub fn data(&self) -> f32 {
-        self.borrow().data
+        self.lock().data
+    }
+
+    pub fn set_data(&self, data: f32) {
+        self.lock().data = data;
+    }
+
+    pub fn accum_data(&self, data: f32) {
+        self.lock().data += data;
     }
 
     pub fn grad(&self) -> f32 {
-        self.borrow().grad
+        self.lock().grad
     }
 
-    pub fn borrow_mut(&self) -> RefMut<'_, InnerValue> {
-        self.v.borrow_mut()
+    pub fn set_grad(&self, grad: f32) {
+        self.lock().grad = grad;
     }
 
-    pub fn borrow(&self) -> Ref<'_, InnerValue> {
-        self.v.borrow()
+    pub fn accum_grad(&self, grad: f32) {
+        self.lock().grad += grad;
     }
+
+    pub fn lock(&self) -> MutexGuard<'_, InnerValue> {
+        self.v.lock().unwrap()
+    }
+
+    // pub fn borrow_mut(&self) -> RefMut<'_, InnerValue> {
+    //     self.v.borrow_mut()
+    // }
+
+    // pub fn borrow(&self) -> Ref<'_, InnerValue> {
+    //     self.v.borrow()
+    // }
 }
 
 /// Activation functions
@@ -116,35 +143,41 @@ impl Value {
     pub fn tanh(&self) -> Value {
         let x = self.data();
         let t = ((2.0 * x).exp() - 1.0) / ((2.0 * x).exp() + 1.0);
-        let out = Value::_new(t, [Value::clone(self), Value::new(0.0)], Op::None);
+        let out = Value::new_subtree(t, [Value::clone(self), Value::new(0.0)], Op::None);
 
-        out.borrow_mut()._backward = |parent: &InnerValue| {
-            if let Some(children) = &parent._prev {
-                let mut logit = children[0].borrow_mut();
+        {
+            let mut out_inner = out.lock();
+            out_inner._backward = |parent: &InnerValue| {
+                if let Some(children) = &parent._prev {
+                    let mut logit = children[0].lock();
 
-                // The derivative of tanh is (1 - tanh^2)
-                logit.grad += (1.0 - parent.data.powi(2)) * parent.grad;
-            }
-        };
+                    // The derivative of tanh is (1 - tanh^2)
+                    logit.grad += (1.0 - parent.data.powi(2)) * parent.grad;
+                }
+            };
+        }
 
         out
     }
 
     pub fn relu(&self) -> Value {
-        let out = Value::_new(
+        let out = Value::new_subtree(
             self.data().max(0.0),
             [Value::clone(self), Value::new(0.0)],
             Op::None,
         );
 
-        out.borrow_mut()._backward = |parent: &InnerValue| {
-            if let Some(children) = &parent._prev {
-                let mut logit = children[0].borrow_mut();
+        {
+            let mut out_inner = out.lock();
+            out_inner._backward = |parent: &InnerValue| {
+                if let Some(children) = &parent._prev {
+                    let mut logit = children[0].lock();
 
-                // The derivative of ReLU is 1 if x > 0, else 0
-                logit.grad += (parent.data > 0.0) as i32 as f32 * parent.grad;
-            }
-        };
+                    // The derivative of ReLU is 1 if x > 0, else 0
+                    logit.grad += (parent.data > 0.0) as i32 as f32 * parent.grad;
+                }
+            };
+        }
 
         out
     }
@@ -158,7 +191,7 @@ impl Clone for Value {
     /// This is an O(1) operation and is very fast.
     fn clone(&self) -> Value {
         Value {
-            v: Rc::clone(&self.v),
+            v: Arc::clone(&self.v),
         }
     }
 }
@@ -167,25 +200,28 @@ impl Add<&Value> for &Value {
     type Output = Value;
 
     fn add(self, rhs: &Value) -> Self::Output {
-        let out = Value::_new(
-            self.borrow().data + rhs.borrow().data,
+        let out = Value::new_subtree(
+            self.data() + rhs.data(),
             [Value::clone(self), Value::clone(rhs)],
             Op::Add,
         );
 
-        // Defining a closure to calculate & accumulate the gradients of out's children.
-        out.borrow_mut()._backward = |parent: &InnerValue| {
-            if let Some(children) = &parent._prev {
-                let mut lhs = children[0].borrow_mut();
-                let mut rhs = children[1].borrow_mut();
+        {
+            // Defining a closure to calculate & accumulate the gradients of out's children.
+            let mut out_inner = out.lock();
+            out_inner._backward = |parent: &InnerValue| {
+                if let Some(children) = &parent._prev {
+                    let mut lhs = children[0].lock();
+                    let mut rhs = children[1].lock();
 
-                // Route the gradient from `parent` to its children. The local gradient
-                // (d out) / (d lhs) = 1.0. This is then multipled by the gradient of the
-                // parent according to the chain rule.
-                lhs.grad += 1.0 * parent.grad;
-                rhs.grad += 1.0 * parent.grad;
+                    // Route the gradient from `parent` to its children. The local gradient
+                    // (d out) / (d lhs) = 1.0. This is then multipled by the gradient of the
+                    // parent according to the chain rule.
+                    lhs.grad += 1.0 * parent.grad;
+                    rhs.grad += 1.0 * parent.grad;
+                };
             };
-        };
+        }
 
         out
     }
@@ -214,22 +250,25 @@ impl Mul<&Value> for &Value {
     type Output = Value;
 
     fn mul(self, rhs: &Value) -> Self::Output {
-        let out = Value::_new(
-            self.borrow().data * rhs.borrow().data,
+        let out = Value::new_subtree(
+            self.data() * rhs.data(),
             [Value::clone(self), Value::clone(rhs)],
             Op::Mul,
         );
 
-        out.borrow_mut()._backward = |parent: &InnerValue| {
-            if let Some(children) = &parent._prev {
-                let mut lhs = children[0].borrow_mut();
-                let mut rhs = children[1].borrow_mut();
+        {
+            let mut out_inner = out.lock();
+            out_inner._backward = |parent: &InnerValue| {
+                if let Some(children) = &parent._prev {
+                    let mut lhs = children[0].lock();
+                    let mut rhs = children[1].lock();
 
-                // Chain rule baby
-                lhs.grad += rhs.data * parent.grad;
-                rhs.grad += lhs.data * parent.grad;
+                    // Chain rule baby
+                    lhs.grad += rhs.data * parent.grad;
+                    rhs.grad += lhs.data * parent.grad;
+                };
             };
-        };
+        }
 
         out
     }
@@ -256,37 +295,43 @@ impl Mul<&Value> for f32 {
 
 impl Value {
     pub fn pow(&self, exponent: f32) -> Value {
-        let out = Value::_new(
-            self.borrow().data.powf(exponent),
+        let out = Value::new_subtree(
+            self.data().powf(exponent),
             [Value::clone(self), Value::new(exponent)],
             Op::Pow,
         );
 
-        out.borrow_mut()._backward = |parent: &InnerValue| {
-            if let Some(children) = &parent._prev {
-                let mut base = children[0].borrow_mut();
-                let exponent = children[1].borrow().data;
+        {
+            let mut out_inner = out.lock();
+            out_inner._backward = |parent: &InnerValue| {
+                if let Some(children) = &parent._prev {
+                    let mut base = children[0].lock();
+                    let exponent = children[1].data();
 
-                base.grad += exponent * base.data.powf(exponent - 1.0) * parent.grad;
-            }
-        };
+                    base.grad += exponent * base.data.powf(exponent - 1.0) * parent.grad;
+                }
+            };
+        }
 
         out
     }
 
     pub fn exp(&self) -> Value {
-        let out = Value::_new(
-            self.borrow().data.exp(),
+        let out = Value::new_subtree(
+            self.data().exp(),
             [Value::clone(self), Value::new(0.0)],
             Op::Exp,
         );
 
-        out.borrow_mut()._backward = |parent: &InnerValue| {
-            if let Some(children) = &parent._prev {
-                let mut lhs = children[0].borrow_mut();
-                lhs.grad += parent.data * parent.grad;
-            }
-        };
+        {
+            let mut out_inner = out.lock();
+            out_inner._backward = |parent: &InnerValue| {
+                if let Some(children) = &parent._prev {
+                    let mut lhs = children[0].lock();
+                    lhs.grad += parent.data * parent.grad;
+                }
+            };
+        }
 
         out
     }
