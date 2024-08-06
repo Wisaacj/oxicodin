@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use engine::Value;
 use mnist::{Mnist, MnistBuilder};
 use ndarray::Array2;
@@ -7,8 +9,7 @@ use rand::seq::SliceRandom;
 pub mod engine;
 pub mod neural;
 
-// TODO: Instantiate `train_data` as a `Value` tensor.
-pub fn load_mnist() -> (Array2<f32>, Vec<u8>, Array2<f32>, Vec<u8>) {
+pub fn load_mnist() -> (Array2<Value>, Vec<u8>, Array2<Value>, Vec<u8>) {
     // Deconstruct the returned Mnist struct.
     let Mnist {
         trn_img,
@@ -25,12 +26,12 @@ pub fn load_mnist() -> (Array2<f32>, Vec<u8>, Array2<f32>, Vec<u8>) {
 
     let train_data = Array2::from_shape_vec((50_000, 784), trn_img)
         .expect("Error converting images to Array2 struct")
-        .map(|x| *x as f32 / 255.0);
+        .map(|x| Value::new(*x as f32 / 255.0));
     println!("train data shape: {:?}", train_data.shape());
 
     let test_data = Array2::from_shape_vec((10_000, 784), tst_img)
         .expect("Error converting images to Array2 struct")
-        .map(|x| *x as f32 / 255.0);
+        .map(|x| Value::new(*x as f32 / 255.0));
     println!("test data shape: {:?}", test_data.shape());
 
     (train_data, trn_lbl, test_data, tst_lbl)
@@ -56,7 +57,7 @@ pub fn mse_loss(predictions: &Vec<Vec<Value>>, targets: &[u8]) -> Value {
 
 pub fn train_epoch(
     mlp: &MLP,
-    train_images: &Array2<f32>,
+    train_images: &Array2<Value>,
     train_labels: &[u8],
     learning_rate: f32,
     batch_size: usize,
@@ -66,17 +67,20 @@ pub fn train_epoch(
     // Shuffle the indices
     let mut indices: Vec<usize> = (0..train_images.nrows()).collect();
     indices.shuffle(&mut rng);
+
     println!(
-        "\ntraining for an epoch of {} mini-batches of size {}",
+        "training for an epoch of {} mini-batches of size {}\n",
         indices.len() / batch_size,
         batch_size
     );
+    println!("{:=^52}", " training progress ");
 
-    // Perform mini-batch gradient descent
+    // Perform mini-batch stochastic gradient descent
     for (batch_num, batch_indices) in indices.chunks(batch_size).enumerate() {
+        let t0 = Instant::now();
         let batch_inputs: Vec<Vec<Value>> = batch_indices
             .iter()
-            .map(|&i| train_images.row(i).iter().map(|&x| Value::new(x)).collect())
+            .map(|&i| train_images.row(i).to_vec())
             .collect();
 
         let batch_targets: Vec<u8> = batch_indices.iter().map(|&i| train_labels[i]).collect();
@@ -84,16 +88,23 @@ pub fn train_epoch(
         // Forward pass & compute loss
         let predictions: Vec<Vec<Value>> = batch_inputs.iter().map(|x| mlp.forward(x)).collect();
         let loss = mse_loss(&predictions, &batch_targets);
-        println!("batch number: {:?}, loss = {}", batch_num, loss.data());
 
         // Reset gradients & backward pass
         mlp.zero_grad();
         loss.backward();
 
-        // Update parameters via gradient descent
+        // Update parameters via mini-batch stochastic gradient descent
         for param in mlp.parameters() {
             param.borrow_mut().data -= learning_rate * param.grad();
         }
+
+        let dt = Instant::now().duration_since(t0);
+        println!(
+            "batch: {:5} | loss: {:.6} | dt: {:>9.2?}",
+            batch_num,
+            loss.data(),
+            dt
+        );
     }
 }
 
@@ -121,14 +132,11 @@ mod tests {
             let test_predictions: Vec<Vec<Value>> = test_data
                 .rows()
                 .into_iter()
-                .map(|row| {
-                    let input: Vec<Value> = row.iter().map(|&x| Value::new(x)).collect();
-                    mlp.forward(&input)
-                })
+                .map(|row| mlp.forward(&row.to_vec()))
                 .collect();
 
             let test_loss = mse_loss(&test_predictions, &test_labels);
-            println!("Epoch {:?}: Test loss = {}", epoch + 1, test_loss.data());
+            println!("epoch: {:?} | test loss: {}", epoch + 1, test_loss.data());
         }
     }
 
