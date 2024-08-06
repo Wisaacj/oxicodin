@@ -309,6 +309,16 @@ impl Div<&Value> for &Value {
     }
 }
 
+impl Div<f32> for &Value {
+    type Output = Value;
+
+    // Value / f32
+    fn div(self, rhs: f32) -> Self::Output {
+        let rhs = Value::new(rhs);
+        self / &rhs
+    }
+}
+
 impl Sub<&Value> for &Value {
     type Output = Value;
 
