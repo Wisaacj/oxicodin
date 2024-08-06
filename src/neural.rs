@@ -1,4 +1,6 @@
 use crate::engine::Value;
+use ndarray::parallel::prelude::*;
+use ndarray::{Array1, Array2, Axis};
 use rand::Rng;
 
 type ActivationFn = fn(&Value) -> Value;
@@ -7,14 +9,12 @@ pub trait Module {
     fn parameters(&self) -> Vec<&Value>;
 
     fn zero_grad(&self) {
-        self.parameters()
-            .iter()
-            .for_each(|p| p.borrow_mut().grad = 0.0);
+        self.parameters().iter().for_each(|p| p.set_grad(0.0));
     }
 }
 
 pub struct Neuron {
-    weights: Vec<Value>,
+    weights: Array1<Value>,
     bias: Value,
     act_fn: Option<ActivationFn>,
 }
@@ -34,7 +34,7 @@ impl Neuron {
         }
     }
 
-    pub fn forward(&self, x: &[Value]) -> Value {
+    pub fn forward(&self, x: &Array1<Value>) -> Value {
         assert_eq!(
             self.weights.len(),
             x.len(),
@@ -67,7 +67,7 @@ impl Module for Neuron {
 }
 
 pub struct Layer {
-    neurons: Vec<Neuron>,
+    neurons: Array1<Neuron>,
 }
 
 impl Layer {
@@ -77,8 +77,34 @@ impl Layer {
         Self { neurons }
     }
 
-    pub fn forward(&self, x: &[Value]) -> Vec<Value> {
-        self.neurons.iter().map(|n| n.forward(x)).collect()
+    pub fn forward(&self, x: &Array1<Value>) -> Array1<Value> {
+        self.neurons
+            .par_iter()
+            .map(|n| n.forward(x))
+            .collect::<Vec<Value>>()
+            .into()
+    }
+
+    // pub fn forward_batch(&self, x: &Array2<Value>) -> Array2<Value> {
+    //     let (batch_size, _) = x.dim();
+
+    //     Array2::from_shape_fn((batch_size, self.neurons.len()), |(i, j)| {
+    //         self.neurons[j].forward(&x.row(i).to_owned())
+    //     })
+    // }
+
+    pub fn forward_batch(&self, x: &Array2<Value>) -> Array2<Value> {
+        let (batch_size, _) = x.dim();
+        let n_out = self.neurons.len();
+
+        let mut results = Vec::new();
+        x.axis_iter(Axis(0))
+            .into_par_iter()
+            .map(|row| self.forward(&row.to_owned()))
+            .collect_into_vec(&mut results);
+
+        Array2::from_shape_vec((batch_size, n_out), results.into_iter().flatten().collect())
+            .unwrap()
     }
 }
 
@@ -112,10 +138,16 @@ impl MLP {
         Self { layers }
     }
 
-    pub fn forward(&self, x: &[Value]) -> Vec<Value> {
+    pub fn forward(&self, x: &Array1<Value>) -> Array1<Value> {
         self.layers
             .iter()
-            .fold(x.to_vec(), |x, layer| layer.forward(&x))
+            .fold(x.clone(), |x, layer| layer.forward(&x))
+    }
+
+    pub fn forward_batch(&self, x: &Array2<Value>) -> Array2<Value> {
+        self.layers
+            .iter()
+            .fold(x.clone(), |x, layer| layer.forward_batch(&x))
     }
 }
 
