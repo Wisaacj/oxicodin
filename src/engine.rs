@@ -52,7 +52,7 @@ impl Value {
     }
 
     /// New with children
-    fn _new(data: f32, children: [Value; 2], op: Op) -> Value {
+    pub fn new_subtree(data: f32, children: [Value; 2], op: Op) -> Value {
         Value {
             v: Rc::new(RefCell::new(InnerValue::new(data, Some(children), op))),
         }
@@ -82,7 +82,7 @@ impl Value {
         topological_sort(self, &mut topo, &mut visited);
 
         // Set the gradient of the output (self) to 1.0
-        self.borrow_mut().grad = 1.0;
+        self.set_grad(1.0);
 
         // Reverse the topological order and call `_backward` on each node
         for node in topo.iter().rev() {
@@ -98,8 +98,24 @@ impl Value {
         self.borrow().data
     }
 
+    pub fn set_data(&self, data: f32) {
+        self.borrow_mut().data = data;
+    }
+
+    pub fn accum_data(&self, data: f32) {
+        self.borrow_mut().data += data;
+    }
+
     pub fn grad(&self) -> f32 {
         self.borrow().grad
+    }
+
+    pub fn set_grad(&self, grad: f32) {
+        self.borrow_mut().grad = grad;
+    }
+
+    pub fn accum_grad(&self, grad: f32) {
+        self.borrow_mut().grad += grad;
     }
 
     pub fn borrow_mut(&self) -> RefMut<'_, InnerValue> {
@@ -116,7 +132,7 @@ impl Value {
     pub fn tanh(&self) -> Value {
         let x = self.data();
         let t = ((2.0 * x).exp() - 1.0) / ((2.0 * x).exp() + 1.0);
-        let out = Value::_new(t, [Value::clone(self), Value::new(0.0)], Op::None);
+        let out = Value::new_subtree(t, [Value::clone(self), Value::new(0.0)], Op::None);
 
         out.borrow_mut()._backward = |parent: &InnerValue| {
             if let Some(children) = &parent._prev {
@@ -131,7 +147,7 @@ impl Value {
     }
 
     pub fn relu(&self) -> Value {
-        let out = Value::_new(
+        let out = Value::new_subtree(
             self.data().max(0.0),
             [Value::clone(self), Value::new(0.0)],
             Op::None,
@@ -167,8 +183,8 @@ impl Add<&Value> for &Value {
     type Output = Value;
 
     fn add(self, rhs: &Value) -> Self::Output {
-        let out = Value::_new(
-            self.borrow().data + rhs.borrow().data,
+        let out = Value::new_subtree(
+            self.data() + rhs.data(),
             [Value::clone(self), Value::clone(rhs)],
             Op::Add,
         );
@@ -214,8 +230,8 @@ impl Mul<&Value> for &Value {
     type Output = Value;
 
     fn mul(self, rhs: &Value) -> Self::Output {
-        let out = Value::_new(
-            self.borrow().data * rhs.borrow().data,
+        let out = Value::new_subtree(
+            self.data() * rhs.data(),
             [Value::clone(self), Value::clone(rhs)],
             Op::Mul,
         );
@@ -256,8 +272,8 @@ impl Mul<&Value> for f32 {
 
 impl Value {
     pub fn pow(&self, exponent: f32) -> Value {
-        let out = Value::_new(
-            self.borrow().data.powf(exponent),
+        let out = Value::new_subtree(
+            self.data().powf(exponent),
             [Value::clone(self), Value::new(exponent)],
             Op::Pow,
         );
@@ -265,7 +281,7 @@ impl Value {
         out.borrow_mut()._backward = |parent: &InnerValue| {
             if let Some(children) = &parent._prev {
                 let mut base = children[0].borrow_mut();
-                let exponent = children[1].borrow().data;
+                let exponent = children[1].data();
 
                 base.grad += exponent * base.data.powf(exponent - 1.0) * parent.grad;
             }
@@ -275,8 +291,8 @@ impl Value {
     }
 
     pub fn exp(&self) -> Value {
-        let out = Value::_new(
-            self.borrow().data.exp(),
+        let out = Value::new_subtree(
+            self.data().exp(),
             [Value::clone(self), Value::new(0.0)],
             Op::Exp,
         );
