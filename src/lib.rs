@@ -215,10 +215,10 @@ mod tests {
         o.backward();
 
         println!("{:#?}", o);
-        assert_eq!((x1.borrow().grad * 10.0) as i32, -15);
-        assert_eq!((w1.borrow().grad * 10.0) as i32, 10);
-        assert_eq!((x2.borrow().grad * 10.0) as i32, 5);
-        assert_eq!((w2.borrow().grad * 10.0) as i32, 0);
+        assert_eq!((x1.grad() * 10.0) as i32, -15);
+        assert_eq!((w1.grad() * 10.0) as i32, 10);
+        assert_eq!((x2.grad() * 10.0) as i32, 5);
+        assert_eq!((w2.grad() * 10.0) as i32, 0);
     }
 
     #[test]
@@ -243,10 +243,10 @@ mod tests {
         o.backward();
 
         println!("{:#?}", o);
-        assert_eq!((x1.borrow().grad * 10.0) as i32, -15);
-        assert_eq!((w1.borrow().grad * 10.0) as i32, 10);
-        assert_eq!((x2.borrow().grad * 10.0) as i32, 5);
-        assert_eq!((w2.borrow().grad * 10.0) as i32, 0);
+        assert_eq!((x1.grad() * 10.0) as i32, -15);
+        assert_eq!((w1.grad() * 10.0) as i32, 10);
+        assert_eq!((x2.grad() * 10.0) as i32, 5);
+        assert_eq!((w2.grad() * 10.0) as i32, 0);
     }
 
     #[test]
@@ -324,41 +324,13 @@ mod tests {
 
         l.backward();
 
-        println!(
-            "a.data: {:?}, a.grad: {:?}",
-            a.borrow().data,
-            a.borrow().grad
-        );
-        println!(
-            "b.data: {:?}, b.grad: {:?}",
-            b.borrow().data,
-            b.borrow().grad
-        );
-        println!(
-            "c.data: {:?}, c.grad: {:?}",
-            c.borrow().data,
-            c.borrow().grad
-        );
-        println!(
-            "d.data: {:?}, d.grad: {:?}",
-            d.borrow().data,
-            d.borrow().grad
-        );
-        println!(
-            "e.data: {:?}, e.grad: {:?}",
-            e.borrow().data,
-            e.borrow().grad
-        );
-        println!(
-            "f.data: {:?}, f.grad: {:?}",
-            f.borrow().data,
-            f.borrow().grad
-        );
-        println!(
-            "l.data: {:?}, l.grad: {:?}",
-            l.borrow().data,
-            l.borrow().grad
-        );
+        println!("a.data: {:?}, a.grad: {:?}", a.data(), a.grad());
+        println!("b.data: {:?}, b.grad: {:?}", b.data(), b.grad());
+        println!("c.data: {:?}, c.grad: {:?}", c.data(), c.grad());
+        println!("d.data: {:?}, d.grad: {:?}", d.data(), d.grad());
+        println!("e.data: {:?}, e.grad: {:?}", e.data(), e.grad());
+        println!("f.data: {:?}, f.grad: {:?}", f.data(), f.grad());
+        println!("l.data: {:?}, l.grad: {:?}", l.data(), l.grad());
 
         println!("\n{:#?}", l.borrow()._prev);
     }

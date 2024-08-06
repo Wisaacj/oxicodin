@@ -7,9 +7,7 @@ pub trait Module {
     fn parameters(&self) -> Vec<&Value>;
 
     fn zero_grad(&self) {
-        self.parameters()
-            .iter()
-            .for_each(|p| p.borrow_mut().grad = 0.0);
+        self.parameters().iter().for_each(|p| p.set_grad(0.0));
     }
 }
 
